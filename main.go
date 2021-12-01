@@ -1,13 +1,15 @@
 package main
 
 import (
+	"github.com/birneee/hquic-proxy-go/proxy"
 	"github.com/urfave/cli/v2"
-	"hquic-proxy-go/proxy"
 	"net"
 	"os"
 )
 
 const defaultProxyControlPort = 18081
+const defaultTLSCertificateFile = "proxy.crt"
+const defaultTLSKeyFile = "proxy.key"
 
 func main() {
 	app := &cli.App{
@@ -27,12 +29,12 @@ func main() {
 			&cli.StringFlag{
 				Name:  "tls-cert",
 				Usage: "certificate file to use",
-				Value: "proxy.crt",
+				Value: defaultTLSCertificateFile,
 			},
 			&cli.StringFlag{
 				Name:  "tls-key",
 				Usage: "key file to use",
-				Value: "proxy.key",
+				Value: defaultTLSKeyFile,
 			},
 		},
 		Action: func(c *cli.Context) error {
