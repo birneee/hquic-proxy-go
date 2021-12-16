@@ -28,14 +28,14 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 				dst.CancelWrite(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				if err.Remote {
-					_ = s.sessionOf(dst).CloseWithError(err.ErrorCode, err.ErrorMessage)
-				}
+				s.proxySession.handleApplicationError(s.sessionOf(src), err)
 				s.handleClose()
 				return
 			default:
 				println(reflect.TypeOf(err).String())
-				panic(err)
+				s.logger.Errorf("%s", err)
+				s.handleClose()
+				return
 			}
 		}
 
@@ -48,14 +48,14 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 				src.CancelRead(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				if err.Remote {
-					_ = s.sessionOf(src).CloseWithError(err.ErrorCode, err.ErrorMessage)
-				}
+				s.proxySession.handleApplicationError(s.sessionOf(dst), err)
 				s.handleClose()
 				return
 			default:
 				println(reflect.TypeOf(err).String())
-				panic(err)
+				s.logger.Errorf("%s", err)
+				s.handleClose()
+				return
 			}
 		}
 

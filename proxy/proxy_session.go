@@ -30,9 +30,7 @@ func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.
 		if err != nil {
 			switch err := err.(type) {
 			case *quic.ApplicationError:
-				if err.Remote {
-					_ = session2.CloseWithError(err.ErrorCode, err.ErrorMessage)
-				}
+				s.handleApplicationError(session1, err)
 			default:
 				//s.logger.Errorf(reflect.TypeOf(err).String())
 				s.logger.Errorf(err.Error())
@@ -46,9 +44,7 @@ func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.
 		if err != nil {
 			switch err := err.(type) {
 			case *quic.ApplicationError:
-				if err.Remote {
-					_ = session1.CloseWithError(err.ErrorCode, err.ErrorMessage)
-				}
+				s.handleApplicationError(session2, err)
 			default:
 				//s.logger.Errorf(reflect.TypeOf(err).String())
 				s.logger.Errorf(err.Error())
@@ -78,6 +74,26 @@ func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.
 
 		ps.run()
 	}
+}
+
+func (s *proxySession) handleApplicationError(from quic.Session, err *quic.ApplicationError) {
+	s.closeOnce.Do(func() {
+		if err.Remote {
+			s.logger.Debugf("forward error: %s", err)
+			_ = s.otherSession(from).CloseWithError(err.ErrorCode, err.ErrorMessage)
+		}
+		s.logger.Infof("close")
+	})
+}
+
+func (s *proxySession) otherSession(session quic.Session) quic.Session {
+	switch session {
+	case s.quicSessionToClient:
+		return s.quicSessionToServer
+	case s.quicSessionToServer:
+		return s.quicSessionToClient
+	}
+	panic("unknown session")
 }
 
 func (s *proxySession) handleClose() {
