@@ -15,22 +15,23 @@ import (
 const HQUICProxyALPN = "qproxy"
 
 type proxy struct {
-	listener                quic.EarlyListener
-	nextControlSessionId    uint64
-	nextProxySessionId      uint64
-	logger                  common.Logger
-	nextProxyConf           *quic.ProxyConfig
-	handoverOverwriteConfig *HandoverOverwriteConfig
+	listener             quic.EarlyListener
+	nextControlSessionId uint64
+	nextProxySessionId   uint64
+	logger               common.Logger
+	nextProxyConf        *quic.ProxyConfig
+	clientSideConf       *ProxyConnectionConfig
+	serverSideConf       *ProxyConnectionConfig
 }
 
-type HandoverOverwriteConfig struct {
-	ClientSideInitialReceiveWindow    uint64
-	ServerSideInitialReceiveWindow    uint64
-	ServerSideMaxReceiveWindow        uint64
-	ClientSideInitialCongestionWindow uint32
+type ProxyConnectionConfig struct {
+	OverwriteInitialReceiveWindow uint64
+	OverwriteMaxReceiveWindow     uint64
+	InitialCongestionWindow       uint32
+	Tracer                        logging.Tracer
 }
 
-func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, nextProxyConfig *quic.ProxyConfig, overwriteConfig *HandoverOverwriteConfig) error {
+func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, nextProxyConfig *quic.ProxyConfig, clientSideConf *ProxyConnectionConfig, serverSideConf *ProxyConnectionConfig) error {
 
 	if len(controlTlsConfig.NextProtos) == 0 {
 		controlTlsConfig.NextProtos = []string{HQUICProxyALPN}
@@ -42,11 +43,12 @@ func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *qui
 	}
 
 	p := &proxy{
-		listener:                listener,
-		nextControlSessionId:    0,
-		logger:                  common.DefaultLogger, //TODO cli option for prefix
-		nextProxyConf:           nextProxyConfig,
-		handoverOverwriteConfig: overwriteConfig,
+		listener:             listener,
+		nextControlSessionId: 0,
+		logger:               common.DefaultLogger, //TODO cli option for prefix
+		nextProxyConf:        nextProxyConfig,
+		clientSideConf:       clientSideConf,
+		serverSideConf:       serverSideConf,
 	}
 
 	fmt.Printf("starting proxy with pid %d, port %d, cc cubic\n", os.Getpid(), addr.Port)
@@ -115,15 +117,21 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	}
 	toServerConf.Tracer = tracer
 	toServerState := state.Clone()
-	if p.handoverOverwriteConfig != nil {
-		if p.handoverOverwriteConfig.ServerSideInitialReceiveWindow != 0 {
-			toServerConf.InitialStreamReceiveWindow = p.handoverOverwriteConfig.ServerSideInitialReceiveWindow
-			toServerConf.InitialConnectionReceiveWindow = uint64(float64(p.handoverOverwriteConfig.ServerSideInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+	if p.serverSideConf != nil {
+		if p.serverSideConf.OverwriteInitialReceiveWindow != 0 {
+			toServerConf.InitialStreamReceiveWindow = p.serverSideConf.OverwriteInitialReceiveWindow
+			toServerConf.InitialConnectionReceiveWindow = uint64(float64(p.serverSideConf.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
 			//TODO adjust transport parameters of state without destroying further handovers
 		}
-		if p.handoverOverwriteConfig.ServerSideMaxReceiveWindow != 0 {
-			toServerConf.MaxStreamReceiveWindow = p.handoverOverwriteConfig.ServerSideMaxReceiveWindow
-			toServerConf.MaxConnectionReceiveWindow = uint64(float64(p.handoverOverwriteConfig.ServerSideMaxReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+		if p.serverSideConf.OverwriteMaxReceiveWindow != 0 {
+			toServerConf.MaxStreamReceiveWindow = p.serverSideConf.OverwriteMaxReceiveWindow
+			toServerConf.MaxConnectionReceiveWindow = uint64(float64(p.serverSideConf.OverwriteMaxReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+		}
+		if p.serverSideConf.InitialCongestionWindow != 0 {
+			panic("implement me")
+		}
+		if p.serverSideConf.Tracer != nil {
+			toServerConf.Tracer = logging.NewMultiplexedTracer(tracer, p.serverSideConf.Tracer)
 		}
 	}
 	sessionToServer, err := quic.RestoreSessionFromHandoverState(*toServerState, logging.PerspectiveClient, toServerConf, fmt.Sprintf("proxy_session %d (to server)", sessionID))
@@ -134,20 +142,23 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	toClientConf := &quic.Config{}
 	toClientConf.Tracer = tracer
 	toClientState := state.Clone()
-	if p.handoverOverwriteConfig != nil {
-		if p.handoverOverwriteConfig.ClientSideInitialReceiveWindow != 0 {
-			toClientState.ServerTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ServerTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ServerTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ServerTransportParameters.InitialMaxData = quic.ByteCount(float64(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
-			toClientState.ClientTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ClientTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ClientTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow)
-			toClientState.ClientTransportParameters.InitialMaxData = quic.ByteCount(float64(p.handoverOverwriteConfig.ClientSideInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+	if p.clientSideConf != nil {
+		if p.clientSideConf.OverwriteInitialReceiveWindow != 0 {
+			toClientState.ServerTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ServerTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ServerTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ServerTransportParameters.InitialMaxData = quic.ByteCount(float64(p.clientSideConf.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+			toClientState.ClientTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ClientTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ClientTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(p.clientSideConf.OverwriteInitialReceiveWindow)
+			toClientState.ClientTransportParameters.InitialMaxData = quic.ByteCount(float64(p.clientSideConf.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
 			//TODO adjust transport parameters of state without destroying further handovers; further handovers currently do not work
 		}
-		if p.handoverOverwriteConfig.ClientSideInitialCongestionWindow != 0 {
-			toClientConf.InitialCongestionWindow = p.handoverOverwriteConfig.ClientSideInitialCongestionWindow
+		if p.clientSideConf.InitialCongestionWindow != 0 {
+			toClientConf.InitialCongestionWindow = p.clientSideConf.InitialCongestionWindow
+		}
+		if p.clientSideConf.Tracer != nil {
+			toClientConf.Tracer = logging.NewMultiplexedTracer(tracer, p.clientSideConf.Tracer)
 		}
 	}
 	sessionToClient, err := quic.RestoreSessionFromHandoverState(*toClientState, logging.PerspectiveServer, toClientConf, fmt.Sprintf("proxy_session %d (to client)", sessionID))
