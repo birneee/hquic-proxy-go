@@ -28,6 +28,8 @@ type ProxyConnectionConfig struct {
 	OverwriteInitialReceiveWindow uint64
 	OverwriteMaxReceiveWindow     uint64
 	InitialCongestionWindow       uint32
+	MinCongestionWindow           uint32
+	MaxCongestionWindow           uint32
 	Tracer                        logging.Tracer
 }
 
@@ -130,6 +132,12 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 		if p.serverSideConf.InitialCongestionWindow != 0 {
 			panic("implement me")
 		}
+		if p.serverSideConf.MinCongestionWindow != 0 {
+			panic("implement me")
+		}
+		if p.serverSideConf.MaxCongestionWindow != 0 {
+			panic("implement me")
+		}
 		if p.serverSideConf.Tracer != nil {
 			toServerConf.Tracer = logging.NewMultiplexedTracer(tracer, p.serverSideConf.Tracer)
 		}
@@ -156,6 +164,12 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 		}
 		if p.clientSideConf.InitialCongestionWindow != 0 {
 			toClientConf.InitialCongestionWindow = p.clientSideConf.InitialCongestionWindow
+		}
+		if p.clientSideConf.MinCongestionWindow != 0 {
+			toClientConf.MinCongestionWindow = p.clientSideConf.MinCongestionWindow
+		}
+		if p.clientSideConf.MaxCongestionWindow != 0 {
+			toClientConf.MaxCongestionWindow = p.clientSideConf.MaxCongestionWindow
 		}
 		if p.clientSideConf.Tracer != nil {
 			toClientConf.Tracer = logging.NewMultiplexedTracer(tracer, p.clientSideConf.Tracer)
