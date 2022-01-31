@@ -69,20 +69,17 @@ func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *qui
 		return nil, err
 	}
 
-	logger := common.DefaultLogger.Clone()
-	if len(os.Getenv(common.LogEnv)) == 0 {
-		logger.SetLogLevel(common.LogLevelInfo) // log level info is the default TODO as prefix
-	}
+	logger := common.DefaultLogger.WithPrefix(controlConfig.LoggerPrefix)
 
 	p := &proxy{
 		listener:             listener,
 		nextControlSessionId: 0,
-		logger:               logger, //TODO cli option for prefix
+		logger:               logger,
 		clientSideConf:       clientSideConf,
 		serverSideConf:       serverSideConf,
 	}
 
-	fmt.Printf("starting proxy with pid %d, port %d, cc cubic\n", os.Getpid(), addr.Port)
+	logger.Infof("starting proxy with pid %d, port %d, cc cubic", os.Getpid(), addr.Port)
 	go p.run()
 
 	return p, nil
