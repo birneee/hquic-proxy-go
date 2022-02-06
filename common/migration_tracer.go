@@ -11,6 +11,8 @@ type migrationTracer struct {
 	onMigration func(addr net.Addr)
 }
 
+var _ logging.Tracer = &migrationTracer{}
+
 func NewMigrationTracer(onMigration func(addr net.Addr)) *migrationTracer {
 	return &migrationTracer{
 		onMigration: onMigration,
@@ -141,4 +143,8 @@ func (a connectionTracer) Debug(name, msg string) {
 
 func (a connectionTracer) UpdatedPath(newRemote net.Addr) {
 	a.onMigration(newRemote)
+}
+
+func (a connectionTracer) XseReceiveRecord(_ logging.StreamID, _ int, _ int) {
+	// ignore
 }
