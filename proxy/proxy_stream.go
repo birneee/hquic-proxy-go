@@ -3,7 +3,6 @@ package proxy
 import (
 	"github.com/birneee/hquic-proxy-go/common"
 	"github.com/lucas-clemente/quic-go"
-	"reflect"
 	"sync"
 )
 
@@ -32,7 +31,6 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 				s.handleClose()
 				return
 			default:
-				println(reflect.TypeOf(err).String())
 				s.logger.Errorf("%s", err)
 				s.handleClose()
 				return
@@ -52,7 +50,6 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 				s.handleClose()
 				return
 			default:
-				println(reflect.TypeOf(err).String())
 				s.logger.Errorf("%s", err)
 				s.handleClose()
 				return
