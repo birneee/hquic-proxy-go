@@ -2,7 +2,7 @@ module github.com/birneee/hquic-proxy-go
 
 go 1.17
 
-replace github.com/lucas-clemente/quic-go => github.com/birneee/quic-go v0.24.0
+replace github.com/lucas-clemente/quic-go => github.com/birneee/quic-go v0.25.0
 
 require github.com/lucas-clemente/quic-go v0.24.0
 
