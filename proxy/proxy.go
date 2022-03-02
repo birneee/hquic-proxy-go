@@ -79,7 +79,8 @@ func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *qui
 		serverSideConf:       serverSideConf,
 	}
 
-	logger.Infof("starting proxy with pid %d, port %d, cc cubic", os.Getpid(), addr.Port)
+	// print new reno as this is the only option in quic-go
+	logger.Infof("starting proxy with pid %d, port %d, cc new reno", os.Getpid(), addr.Port)
 	go p.run()
 
 	return p, nil
