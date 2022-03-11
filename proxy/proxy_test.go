@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/birneee/hquic-proxy-go/internal/testdata"
 	"github.com/lucas-clemente/quic-go"
-	"net"
 	"reflect"
 	"testing"
 )
@@ -68,8 +67,8 @@ func TestOneProxy(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 	clientConfig := clientConfig.Clone()
-	clientConfig.Proxy = &quic.ProxyConfig{
-		Addr:    proxy.Addr().(*net.UDPAddr),
+	clientConfig.ProxyConf = &quic.ProxyConfig{
+		Addr:    proxy.Addr().String(),
 		TlsConf: clientTlsConfig,
 	}
 	client, err := quic.DialAddr(server.Addr().String(), clientTlsConfig, clientConfig)
@@ -100,9 +99,9 @@ func TestTwoProxy(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 	proxy1, err := ListenAddr("127.0.0.1:0", proxyTlsConfig, nil, &ProxyConfig{
-		ServerFacingProxyConnectionConfig: &ProxyConnectionConfig{
-			Proxy: &quic.ProxyConfig{
-				Addr:    proxy2.Addr().(*net.UDPAddr),
+		ServerFacingProxyConnectionConfig: &RestoreConfig{
+			ProxyConf: &quic.ProxyConfig{
+				Addr:    proxy2.Addr().String(),
 				TlsConf: clientTlsConfig,
 			},
 		},
@@ -115,8 +114,8 @@ func TestTwoProxy(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 	clientConfig := clientConfig.Clone()
-	clientConfig.Proxy = &quic.ProxyConfig{
-		Addr:    proxy1.Addr().(*net.UDPAddr),
+	clientConfig.ProxyConf = &quic.ProxyConfig{
+		Addr:    proxy1.Addr().String(),
 		TlsConf: clientTlsConfig,
 	}
 	client, err := quic.DialAddr(server.Addr().String(), clientTlsConfig, clientConfig)

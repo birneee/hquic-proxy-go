@@ -19,26 +19,26 @@ type proxy struct {
 	nextControlSessionId uint64
 	nextProxySessionId   uint64
 	logger               common.Logger
-	clientSideConf       *ProxyConnectionConfig
-	serverSideConf       *ProxyConnectionConfig
+	clientSideConf       *RestoreConfig
+	serverSideConf       *RestoreConfig
 }
 
 var _ Proxy = &proxy{}
 
-type ProxyConnectionConfig struct {
+type RestoreConfig struct {
 	OverwriteInitialReceiveWindow uint64
-	OverwriteMaxReceiveWindow     uint64
+	MaxReceiveWindow              uint64
 	InitialCongestionWindow       uint32
 	MinCongestionWindow           uint32
 	MaxCongestionWindow           uint32
 	Tracer                        logging.Tracer
-	// use an additional proxy on this connection
-	Proxy *quic.ProxyConfig
+	// add a proxy on this connection after restore
+	ProxyConf *quic.ProxyConfig
 }
 
 type ProxyConfig struct {
-	ClientFacingProxyConnectionConfig *ProxyConnectionConfig
-	ServerFacingProxyConnectionConfig *ProxyConnectionConfig
+	ClientFacingProxyConnectionConfig *RestoreConfig
+	ServerFacingProxyConnectionConfig *RestoreConfig
 }
 
 // ListenAddr creates a H-QUIC proxy listening on a given address.
@@ -48,8 +48,8 @@ func ListenAddr(addr string, tlsConfig *tls.Config, config *quic.Config, proxyCo
 		return nil, err
 	}
 
-	var clientFacingProxyConnectionConfig *ProxyConnectionConfig
-	var serverFacingProxyConnectionConfig *ProxyConnectionConfig
+	var clientFacingProxyConnectionConfig *RestoreConfig
+	var serverFacingProxyConnectionConfig *RestoreConfig
 	if proxyConfig != nil {
 		clientFacingProxyConnectionConfig = proxyConfig.ClientFacingProxyConnectionConfig
 		serverFacingProxyConnectionConfig = proxyConfig.ServerFacingProxyConnectionConfig
@@ -58,7 +58,7 @@ func ListenAddr(addr string, tlsConfig *tls.Config, config *quic.Config, proxyCo
 	return RunProxy(*udpAddr, tlsConfig, config, clientFacingProxyConnectionConfig, serverFacingProxyConnectionConfig)
 }
 
-func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, clientSideConf *ProxyConnectionConfig, serverSideConf *ProxyConnectionConfig) (Proxy, error) {
+func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, clientSideConf *RestoreConfig, serverSideConf *RestoreConfig) (Proxy, error) {
 
 	if len(controlTlsConfig.NextProtos) == 0 {
 		controlTlsConfig.NextProtos = []string{HQUICProxyALPN}
@@ -137,19 +137,19 @@ func (p *proxy) validateHandoverState(state *handover.State) error {
 	return nil
 }
 
-func applyConfig(originalHandoverState *handover.State, pcc *ProxyConnectionConfig, tracer logging.Tracer) (*handover.State, *quic.Config) {
+func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, tracer logging.Tracer) (*handover.State, *quic.Config) {
 	conf := &quic.Config{}
 	s := originalHandoverState.Clone()
 
 	if pcc != nil {
-		conf.Proxy = pcc.Proxy
-		if conf.Proxy != nil {
+		conf.ProxyConf = pcc.ProxyConf
+		if conf.ProxyConf != nil {
 			conf.EnableActiveMigration = true
 			conf.IgnoreReceived1RTTPacketsUntilFirstPathMigration = true
-			if conf.Proxy.ModifyState != nil {
+			if conf.ProxyConf.ModifyState != nil {
 				panic("not supported yet")
 			}
-			conf.Proxy.ModifyState = func(state *handover.State) {
+			conf.ProxyConf.ModifyState = func(state *handover.State) {
 				// use original transport parameters because they might have changed because of proxy optimizations
 				state.ClientTransportParameters = originalHandoverState.ClientTransportParameters
 				state.ServerTransportParameters = originalHandoverState.ServerTransportParameters
@@ -168,9 +168,9 @@ func applyConfig(originalHandoverState *handover.State, pcc *ProxyConnectionConf
 			s.ClientTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
 			s.ClientTransportParameters.InitialMaxData = quic.ByteCount(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
 		}
-		if pcc.OverwriteMaxReceiveWindow != 0 {
-			conf.MaxStreamReceiveWindow = pcc.OverwriteMaxReceiveWindow
-			conf.MaxConnectionReceiveWindow = uint64(float64(pcc.OverwriteMaxReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+		if pcc.MaxReceiveWindow != 0 {
+			conf.MaxStreamReceiveWindow = pcc.MaxReceiveWindow
+			conf.MaxConnectionReceiveWindow = uint64(float64(pcc.MaxReceiveWindow) * quic.ConnectionFlowControlMultiplier)
 		}
 		if pcc.InitialCongestionWindow != 0 {
 			conf.InitialCongestionWindow = pcc.InitialCongestionWindow
@@ -215,13 +215,15 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	})
 
 	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.serverSideConf, tracer)
-	serverFacingSession, err := quic.RestoreSessionFromHandoverState(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig, fmt.Sprintf("proxy_session %d (server facing)", sessionID))
+	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
+	serverFacingSession, err := quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
 	if err != nil {
 		return err
 	}
 
 	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.clientSideConf, tracer)
-	clientFacingSession, err := quic.RestoreSessionFromHandoverState(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig, fmt.Sprintf("proxy_session %d (client facing)", sessionID))
+	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
+	clientFacingSession, err := quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
 	if err != nil {
 		return err
 	}
