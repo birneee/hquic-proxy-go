@@ -3,6 +3,7 @@ package proxy
 import (
 	"github.com/birneee/hquic-proxy-go/common"
 	"github.com/lucas-clemente/quic-go"
+	"io"
 	"sync"
 )
 
@@ -15,7 +16,8 @@ type proxyStream struct {
 	closeOnce      sync.Once
 }
 
-func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
+func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
+	eof := false
 	buf := make([]byte, 1e6)
 	for {
 		nr, err := src.Read(buf)
@@ -31,9 +33,14 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 				s.handleClose()
 				return
 			default:
-				s.logger.Errorf("%s", err)
-				s.handleClose()
-				return
+				if err == io.EOF {
+					// close one direction of stream
+					eof = true
+				} else {
+					s.logger.Errorf("%s", err)
+					s.handleClose()
+					return
+				}
 			}
 		}
 
@@ -59,6 +66,14 @@ func (s *proxyStream) forward(dst quic.Stream, src quic.Stream) {
 		if nr != nw {
 			panic("short write error")
 		}
+
+		if eof {
+			err = dst.Close()
+			if err != nil {
+				s.logger.Errorf("failed to close stream: %s", err)
+			}
+			return
+		}
 	}
 }
 
@@ -74,7 +89,7 @@ func (s *proxyStream) handleClose() {
 	})
 }
 
-func (s *proxyStream) sessionOf(stream quic.Stream) quic.Session {
+func (s *proxyStream) sessionOf(stream interface{}) quic.Session {
 	if stream == s.streamToClient {
 		return s.proxySession.quicSessionToClient
 	} else {
