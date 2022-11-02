@@ -29,7 +29,7 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 				dst.CancelWrite(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				s.proxySession.handleApplicationError(s.sessionOf(src), err)
+				s.proxySession.handleApplicationError(s.connectionOf(src), err)
 				s.handleClose()
 				return
 			default:
@@ -53,7 +53,7 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 				src.CancelRead(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				s.proxySession.handleApplicationError(s.sessionOf(dst), err)
+				s.proxySession.handleApplicationError(s.connectionOf(dst), err)
 				s.handleClose()
 				return
 			default:
@@ -89,10 +89,10 @@ func (s *proxyStream) handleClose() {
 	})
 }
 
-func (s *proxyStream) sessionOf(stream interface{}) quic.Session {
+func (s *proxyStream) connectionOf(stream interface{}) quic.Connection {
 	if stream == s.streamToClient {
-		return s.proxySession.quicSessionToClient
+		return s.proxySession.quicConnToClient
 	} else {
-		return s.proxySession.quicSessionToServer
+		return s.proxySession.quicConnToServer
 	}
 }

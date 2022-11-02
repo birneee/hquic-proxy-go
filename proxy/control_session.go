@@ -10,17 +10,17 @@ import (
 )
 
 type controlSession struct {
-	sessionID   uint64
-	quicSession quic.Session
-	logger      common.Logger
+	sessionID uint64
+	quicConn  quic.Connection
+	logger    common.Logger
 }
 
-func newControlSession(sessionID uint64, quicSession quic.Session, logger common.Logger) *controlSession {
-	return &controlSession{sessionID: sessionID, quicSession: quicSession, logger: logger}
+func newControlSession(sessionID uint64, quicConn quic.Connection, logger common.Logger) *controlSession {
+	return &controlSession{sessionID: sessionID, quicConn: quicConn, logger: logger}
 }
 
 func (s *controlSession) readHandoverStateAndClose() (*handover.State, error) {
-	stream, err := s.quicSession.AcceptStream(context.Background())
+	stream, err := s.quicConn.AcceptStream(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func (s *controlSession) readHandoverStateAndClose() (*handover.State, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = s.quicSession.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "handover_state_received")
+	_ = s.quicConn.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "handover_state_received")
 
 	return state, nil
 }

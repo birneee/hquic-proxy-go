@@ -12,6 +12,7 @@ import (
 	"os"
 )
 
+// TODO IANA registration
 const HQUICProxyALPN = "qproxy"
 
 type proxy struct {
@@ -60,6 +61,10 @@ func ListenAddr(addr string, tlsConfig *tls.Config, config *quic.Config, proxyCo
 
 func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, clientSideConf *RestoreConfig, serverSideConf *RestoreConfig) (Proxy, error) {
 
+	if controlConfig == nil {
+		controlConfig = &quic.Config{}
+	}
+
 	if len(controlTlsConfig.NextProtos) == 0 {
 		controlTlsConfig.NextProtos = []string{HQUICProxyALPN}
 	}
@@ -87,13 +92,13 @@ func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *qui
 }
 
 func (p *proxy) acceptControlSession() (*controlSession, error) {
-	quicSession, err := p.listener.Accept(context.Background())
+	quicConn, err := p.listener.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	controlSessionID := p.nextControlSessionId
 	p.nextControlSessionId += 1
-	return newControlSession(controlSessionID, quicSession, p.logger.WithPrefix(fmt.Sprintf("control_session %d", controlSessionID))), nil
+	return newControlSession(controlSessionID, quicConn, p.logger.WithPrefix(fmt.Sprintf("control_session %d", controlSessionID))), nil
 }
 
 func (p *proxy) run() {
@@ -119,7 +124,7 @@ func (p *proxy) run() {
 		controlSession.logger.Infof("closed")
 		proxySessionID := p.nextProxySessionId
 		p.nextProxySessionId += 1
-		err = p.runProxySession(handoverState, proxySessionID, controlSession.quicSession.RemoteAddr().(*net.UDPAddr))
+		err = p.runProxySession(handoverState, proxySessionID, controlSession.quicConn.RemoteAddr().(*net.UDPAddr))
 		if err != nil {
 			controlSession.logger.Errorf("failed to run proxy session: %s", err)
 			continue
@@ -216,23 +221,23 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 
 	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.serverSideConf, tracer)
 	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
-	serverFacingSession, err := quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
+	serverFacingConn, err := quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
 	if err != nil {
 		return err
 	}
 
 	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.clientSideConf, tracer)
 	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
-	clientFacingSession, err := quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
+	clientFacingConn, err := quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
 	if err != nil {
 		return err
 	}
 
 	proxySession := proxySession{
-		sessionID:           sessionID,
-		quicSessionToServer: serverFacingSession,
-		quicSessionToClient: clientFacingSession,
-		logger:              logger,
+		sessionID:        sessionID,
+		quicConnToServer: serverFacingConn,
+		quicConnToClient: clientFacingConn,
+		logger:           logger,
 	}
 
 	go proxySession.run()

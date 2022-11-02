@@ -9,47 +9,45 @@ import (
 )
 
 type proxySession struct {
-	sessionID           uint64
-	quicSessionToClient quic.Session
-	quicSessionToServer quic.Session
-	logger              common.Logger
-	closeOnce           sync.Once
+	sessionID        uint64
+	quicConnToClient quic.Connection
+	quicConnToServer quic.Connection
+	logger           common.Logger
+	closeOnce        sync.Once
 }
 
 func (s *proxySession) run() {
 	s.logger.Infof("open")
-	go s.handleOpenedStreams(s.quicSessionToClient, s.quicSessionToServer)
-	go s.handleOpenedStreams(s.quicSessionToServer, s.quicSessionToClient)
+	go s.handleOpenedStreams(s.quicConnToClient, s.quicConnToServer)
+	go s.handleOpenedStreams(s.quicConnToServer, s.quicConnToClient)
 }
 
-// handle streams opened by the session1
-// request is forwarded to session2
-func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.Session) {
+// handle streams opened by the conn1
+// request is forwarded to conn2
+func (s *proxySession) handleOpenedStreams(conn1 quic.Connection, conn2 quic.Connection) {
 	for {
-		stream1, err := session1.AcceptStream(context.Background())
+		stream1, err := conn1.AcceptStream(context.Background())
 		if err != nil {
 			switch err := err.(type) {
 			case *quic.ApplicationError:
-				s.handleApplicationError(session1, err)
+				s.handleApplicationError(conn1, err)
 			default:
-				//s.logger.Errorf(reflect.TypeOf(err).String())
 				s.logger.Errorf(err.Error())
 				//TODO make Transport Error instead of Application Error
-				_ = session2.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy session")
+				_ = conn2.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy connection")
 			}
 			s.handleClose()
 			return
 		}
-		stream2, err := session2.OpenStream()
+		stream2, err := conn2.OpenStream()
 		if err != nil {
 			switch err := err.(type) {
 			case *quic.ApplicationError:
-				s.handleApplicationError(session2, err)
+				s.handleApplicationError(conn2, err)
 			default:
-				//s.logger.Errorf(reflect.TypeOf(err).String())
 				s.logger.Errorf(err.Error())
 				//TODO make Transport Error instead of Application Error
-				_ = session1.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy quic session")
+				_ = conn1.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy quic connection")
 			}
 			s.handleClose()
 			return
@@ -64,7 +62,7 @@ func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.
 			logger:       s.logger.WithPrefix(fmt.Sprintf("stream %d", stream1.StreamID())),
 		}
 
-		if session1 == s.quicSessionToClient {
+		if conn1 == s.quicConnToClient {
 			ps.streamToClient = stream1
 			ps.streamToServer = stream2
 		} else {
@@ -76,24 +74,24 @@ func (s *proxySession) handleOpenedStreams(session1 quic.Session, session2 quic.
 	}
 }
 
-func (s *proxySession) handleApplicationError(from quic.Session, err *quic.ApplicationError) {
+func (s *proxySession) handleApplicationError(from quic.Connection, err *quic.ApplicationError) {
 	s.closeOnce.Do(func() {
 		if err.Remote {
 			s.logger.Debugf("forward error: %s", err)
-			_ = s.otherSession(from).CloseWithError(err.ErrorCode, err.ErrorMessage)
+			_ = s.otherConnection(from).CloseWithError(err.ErrorCode, err.ErrorMessage)
 		}
 		s.logger.Infof("close")
 	})
 }
 
-func (s *proxySession) otherSession(session quic.Session) quic.Session {
-	switch session {
-	case s.quicSessionToClient:
-		return s.quicSessionToServer
-	case s.quicSessionToServer:
-		return s.quicSessionToClient
+func (s *proxySession) otherConnection(conn quic.Connection) quic.Connection {
+	switch conn {
+	case s.quicConnToClient:
+		return s.quicConnToServer
+	case s.quicConnToServer:
+		return s.quicConnToClient
 	}
-	panic("unknown session")
+	panic("unknown connection")
 }
 
 func (s *proxySession) handleClose() {
