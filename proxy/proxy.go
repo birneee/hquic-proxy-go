@@ -12,16 +12,11 @@ import (
 	"os"
 )
 
-// TODO IANA registration
-const HQUICProxyALPN = "qproxy"
-
 type proxy struct {
-	listener             quic.EarlyListener
+	controlListener      quic.EarlyListener
 	nextControlSessionId uint64
 	nextProxySessionId   uint64
-	logger               common.Logger
-	clientSideConf       *RestoreConfig
-	serverSideConf       *RestoreConfig
+	config               *Config
 }
 
 var _ Proxy = &proxy{}
@@ -37,68 +32,99 @@ type RestoreConfig struct {
 	ProxyConf *quic.ProxyConfig
 }
 
-type ProxyConfig struct {
+func populateRestoreConfig(config *RestoreConfig) *RestoreConfig {
+	if config == nil {
+		config = &RestoreConfig{}
+	}
+	if config.InitialCongestionWindow == 0 {
+		config.InitialCongestionWindow = quic.DefaultInitialCongestionWindow
+	}
+	if config.MinCongestionWindow == 0 {
+		config.MinCongestionWindow = quic.DefaultMinCongestionWindow
+	}
+	if config.MaxCongestionWindow == 0 {
+		config.MaxCongestionWindow = quic.DefaultMaxCongestionWindow
+	}
+	return config
+}
+
+type Config struct {
+	Logger                            common.Logger
+	ControlConfig                     *ControlConfig
 	ClientFacingProxyConnectionConfig *RestoreConfig
 	ServerFacingProxyConnectionConfig *RestoreConfig
 }
 
-// ListenAddr creates a H-QUIC proxy listening on a given address.
-func ListenAddr(addr string, tlsConfig *tls.Config, config *quic.Config, proxyConfig *ProxyConfig) (Proxy, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil, err
+func populateConfig(config *Config) *Config {
+	if config == nil {
+		config = &Config{}
 	}
-
-	var clientFacingProxyConnectionConfig *RestoreConfig
-	var serverFacingProxyConnectionConfig *RestoreConfig
-	if proxyConfig != nil {
-		clientFacingProxyConnectionConfig = proxyConfig.ClientFacingProxyConnectionConfig
-		serverFacingProxyConnectionConfig = proxyConfig.ServerFacingProxyConnectionConfig
+	if config.Logger == nil {
+		config.Logger = common.DefaultLogger.WithPrefix("proxy")
 	}
-
-	return RunProxy(*udpAddr, tlsConfig, config, clientFacingProxyConnectionConfig, serverFacingProxyConnectionConfig)
+	config.ControlConfig = populateControlConfig(config.ControlConfig, config.Logger.WithPrefix("control").Prefix())
+	config.ClientFacingProxyConnectionConfig = populateRestoreConfig(config.ClientFacingProxyConnectionConfig)
+	config.ServerFacingProxyConnectionConfig = populateRestoreConfig(config.ServerFacingProxyConnectionConfig)
+	return config
 }
 
-func RunProxy(addr net.UDPAddr, controlTlsConfig *tls.Config, controlConfig *quic.Config, clientSideConf *RestoreConfig, serverSideConf *RestoreConfig) (Proxy, error) {
+type ControlConfig struct {
+	Addr       net.Addr
+	TlsConfig  *tls.Config
+	QuicConfig *quic.Config
+}
 
-	if controlConfig == nil {
-		controlConfig = &quic.Config{}
+func populateControlConfig(config *ControlConfig, defaultLoggerPrefix string) *ControlConfig {
+	if config == nil {
+		config = &ControlConfig{}
 	}
-
-	if len(controlTlsConfig.NextProtos) == 0 {
-		controlTlsConfig.NextProtos = []string{HQUICProxyALPN}
+	if config.Addr == nil {
+		config.Addr = &net.UDPAddr{IP: net.IPv4zero, Port: common.DefaultProxyControlPort}
 	}
+	if config.TlsConfig == nil {
+		config.TlsConfig = &tls.Config{}
+	}
+	if config.TlsConfig.NextProtos == nil || len(config.TlsConfig.NextProtos) == 0 {
+		config.TlsConfig.NextProtos = []string{common.HQUICProxyALPN}
+	}
+	if config.QuicConfig == nil {
+		config.QuicConfig = &quic.Config{}
+	}
+	if config.QuicConfig.LoggerPrefix == "" {
+		config.QuicConfig.LoggerPrefix = defaultLoggerPrefix
+	}
+	return config
+}
 
-	listener, err := quic.ListenAddrEarly(addr.String(), controlTlsConfig, controlConfig)
+// Run creates a H-QUIC proxy
+func Run(config *Config) (Proxy, error) {
+	config = populateConfig(config)
+
+	controlListener, err := quic.ListenAddrEarly(config.ControlConfig.Addr.String(), config.ControlConfig.TlsConfig, config.ControlConfig.QuicConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	logger := common.DefaultLogger.WithPrefix(controlConfig.LoggerPrefix)
-
 	p := &proxy{
-		listener:             listener,
-		nextControlSessionId: 0,
-		logger:               logger,
-		clientSideConf:       clientSideConf,
-		serverSideConf:       serverSideConf,
+		controlListener: controlListener,
+		config:          config,
 	}
 
 	// print new reno as this is the only option in quic-go
-	logger.Infof("starting proxy with pid %d, port %d, cc new reno", os.Getpid(), addr.Port)
+	config.Logger.Infof("starting proxy with pid %d, port %d, cc new reno", os.Getpid(), config.ControlConfig.Addr.(*net.UDPAddr).Port)
 	go p.run()
 
 	return p, nil
 }
 
 func (p *proxy) acceptControlSession() (*controlSession, error) {
-	quicConn, err := p.listener.Accept(context.Background())
+	quicConn, err := p.controlListener.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	controlSessionID := p.nextControlSessionId
 	p.nextControlSessionId += 1
-	return newControlSession(controlSessionID, quicConn, p.logger.WithPrefix(fmt.Sprintf("control_session %d", controlSessionID))), nil
+	return newControlSession(controlSessionID, quicConn, p.config.Logger.WithPrefix(fmt.Sprintf("control_session %d", controlSessionID))), nil
 }
 
 func (p *proxy) run() {
@@ -214,19 +240,19 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 		}
 	}
 
-	logger := p.logger.WithPrefix(fmt.Sprintf("proxy_session %d", sessionID))
+	logger := p.config.Logger.WithPrefix(fmt.Sprintf("proxy_session %d", sessionID))
 	tracer := common.NewMigrationTracer(func(addr net.Addr) {
 		logger.Debugf("migrated to %s\n", addr)
 	})
 
-	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.serverSideConf, tracer)
+	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.config.ServerFacingProxyConnectionConfig, tracer)
 	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
 	serverFacingConn, err := quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
 	if err != nil {
 		return err
 	}
 
-	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.clientSideConf, tracer)
+	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.config.ClientFacingProxyConnectionConfig, tracer)
 	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
 	clientFacingConn, err := quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
 	if err != nil {
@@ -245,9 +271,9 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 }
 
 func (p *proxy) Addr() net.Addr {
-	return p.listener.Addr()
+	return p.controlListener.Addr()
 }
 
 func (p *proxy) Close() error {
-	return p.listener.Close()
+	return p.controlListener.Close()
 }

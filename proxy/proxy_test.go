@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/birneee/hquic-proxy-go/common"
 	"github.com/birneee/hquic-proxy-go/internal/testdata"
 	"github.com/lucas-clemente/quic-go"
 	"net"
@@ -54,7 +55,7 @@ var serverConfig = &quic.Config{
 
 var proxyControlTlsConfig = &tls.Config{
 	InsecureSkipVerify: true,
-	NextProtos:         []string{HQUICProxyALPN},
+	NextProtos:         []string{common.HQUICProxyALPN},
 }
 
 var clientTlsConfig = &tls.Config{
@@ -100,7 +101,12 @@ func TestOneProxy(t *testing.T) {
 	proxyContext, proxyContextCancel := context.WithCancel(context.Background())
 	proxyAddrChan := make(chan net.Addr, 1)
 	go func() {
-		proxy, err := ListenAddr("127.0.0.1:0", proxyTlsConfig, nil, nil)
+		proxy, err := Run(&Config{
+			ControlConfig: &ControlConfig{
+				Addr:      &net.UDPAddr{IP: common.IPv4loopback, Port: 0},
+				TlsConfig: proxyTlsConfig,
+			},
+		})
 		if err != nil {
 			t.Errorf(err.Error())
 		}
@@ -136,11 +142,26 @@ func TestOneProxy(t *testing.T) {
 }
 
 func TestTwoProxy(t *testing.T) {
-	proxy2, err := ListenAddr("127.0.0.1:0", proxyTlsConfig, &quic.Config{LoggerPrefix: "proxy2"}, nil)
+	proxy2, err := Run(&Config{
+		ControlConfig: &ControlConfig{
+			Addr:      &net.UDPAddr{IP: common.IPv4loopback, Port: 0},
+			TlsConfig: proxyTlsConfig,
+			QuicConfig: &quic.Config{
+				LoggerPrefix: "proxy2",
+			},
+		},
+	})
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-	proxy1, err := ListenAddr("127.0.0.1:0", proxyTlsConfig, &quic.Config{LoggerPrefix: "proxy1"}, &ProxyConfig{
+	proxy1, err := Run(&Config{
+		ControlConfig: &ControlConfig{
+			Addr:      &net.UDPAddr{IP: common.IPv4loopback, Port: 0},
+			TlsConfig: proxyTlsConfig,
+			QuicConfig: &quic.Config{
+				LoggerPrefix: "proxy1",
+			},
+		},
 		ServerFacingProxyConnectionConfig: &RestoreConfig{
 			ProxyConf: &quic.ProxyConfig{
 				Addr:    proxy2.Addr().String(),

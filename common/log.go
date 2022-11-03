@@ -27,6 +27,7 @@ const LogEnv = "HQUIC_PROXY_LOG_LEVEL"
 
 // A Logger logs.
 type Logger interface {
+	Prefix() string
 	SetLogLevel(LogLevel)
 	SetLogTimeFormat(format string)
 	WithPrefix(prefix string) Logger
@@ -44,6 +45,10 @@ type defaultLogger struct {
 
 	logLevel   LogLevel
 	timeFormat string
+}
+
+func (l *defaultLogger) Prefix() string {
+	return l.prefix
 }
 
 var _ Logger = &defaultLogger{}
