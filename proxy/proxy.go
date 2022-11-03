@@ -79,13 +79,13 @@ func populateControlConfig(config *ControlConfig, defaultLoggerPrefix string) *C
 		config = &ControlConfig{}
 	}
 	if config.Addr == nil {
-		config.Addr = &net.UDPAddr{IP: net.IPv4zero, Port: common.DefaultProxyControlPort}
+		config.Addr = &net.UDPAddr{IP: net.IPv4zero, Port: quic.DefaultHQUICProxyControlPort}
 	}
 	if config.TlsConfig == nil {
 		config.TlsConfig = &tls.Config{}
 	}
 	if config.TlsConfig.NextProtos == nil || len(config.TlsConfig.NextProtos) == 0 {
-		config.TlsConfig.NextProtos = []string{common.HQUICProxyALPN}
+		config.TlsConfig.NextProtos = []string{quic.HQUICProxyALPN}
 	}
 	if config.QuicConfig == nil {
 		config.QuicConfig = &quic.Config{}

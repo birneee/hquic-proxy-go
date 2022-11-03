@@ -31,7 +31,7 @@ func main() {
 			&cli.UintFlag{
 				Name:  "port",
 				Usage: "port of the proxy to listen on, for control connections",
-				Value: common.DefaultProxyControlPort,
+				Value: quic.DefaultHQUICProxyControlPort,
 			},
 			&cli.StringFlag{
 				Name:  "tls-cert",
@@ -103,7 +103,7 @@ func main() {
 			var nextProxyConf *quic.ProxyConfig
 			if c.IsSet("next-proxy") {
 				var err error
-				nextProxyAddr, err := common.ParseResolveHost(c.String("next-proxy"), common.DefaultProxyControlPort)
+				nextProxyAddr, err := common.ParseResolveHost(c.String("next-proxy"), quic.DefaultHQUICProxyControlPort)
 				if err != nil {
 					panic(err)
 				}
@@ -112,7 +112,7 @@ func main() {
 					TlsConf: &tls.Config{
 						RootCAs:            common.NewCertPoolWithCert(c.String("next-proxy-cert")),
 						ClientSessionCache: tls.NewLRUClientSessionCache(1),
-						NextProtos:         []string{common.HQUICProxyALPN},
+						NextProtos:         []string{quic.HQUICProxyALPN},
 					},
 					Config: &quic.Config{
 						TokenStore:           quic.NewLRUTokenStore(1, 1),
