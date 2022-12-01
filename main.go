@@ -164,6 +164,7 @@ func main() {
 				if err != nil {
 					return err
 				}
+				logger.Infof("stored session ticket and address token of next proxy for 0-RTT")
 			}
 
 			prox, err := proxy.Run(&proxy.Config{
