@@ -67,6 +67,21 @@ func main() {
 				Usage: "the maximum congestion window to use on client facing proxy connections, in number of packets",
 				Value: quic.DefaultMaxCongestionWindow,
 			},
+			&cli.Int64Flag{
+				Name:  "client-facing-initial-slow-start-threshold",
+				Usage: "the initial slow start congestion threshold, aka initial ssthresh, in number of bytes",
+				Value: int64(quic.DefaultInitialSlowStartThreshold),
+			},
+			&cli.Int64Flag{
+				Name:  "client-facing-min-slow-start-threshold",
+				Usage: "the minimum slow start congestion threshold, in number of bytes",
+				Value: int64(quic.DefaultMinSlowStartThreshold),
+			},
+			&cli.Int64Flag{
+				Name:  "client-facing-max-slow-start-threshold",
+				Usage: "the maximum slow start congestion threshold, in number of bytes",
+				Value: int64(quic.DefaultMaxSlowStartThreshold),
+			},
 			&cli.StringFlag{
 				Name:  "client-facing-initial-receive-window",
 				Usage: "the initial receive window on the client facing proxy connection, in bytes, overwrites the value from the handover state",
@@ -188,6 +203,9 @@ func main() {
 					InitialCongestionWindow:       uint32(c.Uint("client-facing-initial-congestion-window")),
 					MinCongestionWindow:           uint32(c.Uint("client-facing-min-congestion-window")),
 					MaxCongestionWindow:           uint32(c.Uint("client-facing-max-congestion-window")),
+					InitialSlowStartThreshold:     quic.ByteCount(c.Int64("client-facing-initial-slow-start-threshold")),
+					MinSlowStartThreshold:         quic.ByteCount(c.Int64("client-facing-min-slow-start-threshold")),
+					MaxSlowStartThreshold:         quic.ByteCount(c.Int64("client-facing-max-slow-start-threshold")),
 					OverwriteInitialReceiveWindow: clientSideInitialReceiveWindow,
 					Tracer:                        clientFacingTracer,
 				},

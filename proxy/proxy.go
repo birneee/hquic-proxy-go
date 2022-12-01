@@ -27,6 +27,9 @@ type RestoreConfig struct {
 	InitialCongestionWindow       uint32
 	MinCongestionWindow           uint32
 	MaxCongestionWindow           uint32
+	InitialSlowStartThreshold     quic.ByteCount
+	MinSlowStartThreshold         quic.ByteCount
+	MaxSlowStartThreshold         quic.ByteCount
 	Tracer                        logging.Tracer
 	// add a proxy on this connection after restore
 	ProxyConf *quic.ProxyConfig
@@ -45,6 +48,16 @@ func populateRestoreConfig(config *RestoreConfig) *RestoreConfig {
 	if config.MaxCongestionWindow == 0 {
 		config.MaxCongestionWindow = quic.DefaultMaxCongestionWindow
 	}
+	if config.InitialSlowStartThreshold == 0 {
+		config.InitialSlowStartThreshold = quic.DefaultInitialSlowStartThreshold
+	}
+	if config.MinSlowStartThreshold == 0 {
+		config.MinSlowStartThreshold = quic.DefaultMinSlowStartThreshold
+	}
+	if config.MaxSlowStartThreshold == 0 {
+		config.MaxSlowStartThreshold = quic.DefaultMaxSlowStartThreshold
+	}
+
 	return config
 }
 
@@ -211,6 +224,15 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 		}
 		if pcc.MaxCongestionWindow != 0 {
 			conf.MaxCongestionWindow = pcc.MaxCongestionWindow
+		}
+		if pcc.InitialSlowStartThreshold != 0 {
+			conf.InitialSlowStartThreshold = pcc.InitialSlowStartThreshold
+		}
+		if pcc.MinSlowStartThreshold != 0 {
+			conf.MinSlowStartThreshold = pcc.MinSlowStartThreshold
+		}
+		if pcc.MaxSlowStartThreshold != 0 {
+			conf.MaxSlowStartThreshold = pcc.MaxSlowStartThreshold
 		}
 		if pcc.Tracer != nil {
 			conf.Tracer = logging.NewMultiplexedTracer(tracer, pcc.Tracer)
