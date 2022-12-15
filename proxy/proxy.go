@@ -186,7 +186,9 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 	s := originalHandoverState.Clone()
 
 	if pcc != nil {
-		conf.ProxyConf = pcc.ProxyConf
+		if pcc.ProxyConf != nil {
+			conf.ProxyConf = pcc.ProxyConf.Clone()
+		}
 		if conf.ProxyConf != nil {
 			conf.EnableActiveMigration = true
 			conf.IgnoreReceived1RTTPacketsUntilFirstPathMigration = true
