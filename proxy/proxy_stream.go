@@ -29,16 +29,14 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 				dst.CancelWrite(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				s.proxySession.handleApplicationError(s.connectionOf(src), err)
-				s.handleClose()
+				s.proxySession.handleError(s.connectionOf(src), err)
 				return
 			default:
 				if err == io.EOF {
 					// close one direction of stream
 					eof = true
 				} else {
-					s.logger.Errorf("%s", err)
-					s.handleClose()
+					s.proxySession.handleError(s.connectionOf(src), err)
 					return
 				}
 			}
@@ -53,12 +51,10 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 				src.CancelRead(err.ErrorCode)
 				return
 			case *quic.ApplicationError:
-				s.proxySession.handleApplicationError(s.connectionOf(dst), err)
-				s.handleClose()
+				s.proxySession.handleError(s.connectionOf(dst), err)
 				return
 			default:
-				s.logger.Errorf("%s", err)
-				s.handleClose()
+				s.proxySession.handleError(s.connectionOf(dst), err)
 				return
 			}
 		}
@@ -68,6 +64,7 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 		}
 
 		if eof {
+			s.logger.Debugf("eof")
 			err = dst.Close()
 			if err != nil {
 				s.logger.Errorf("failed to close stream: %s", err)
@@ -81,12 +78,6 @@ func (s *proxyStream) run() {
 	s.logger.Infof("open")
 	go s.forward(s.streamToClient, s.streamToServer)
 	go s.forward(s.streamToServer, s.streamToClient)
-}
-
-func (s *proxyStream) handleClose() {
-	s.closeOnce.Do(func() {
-		s.logger.Infof("close")
-	})
 }
 
 func (s *proxyStream) connectionOf(stream interface{}) quic.Connection {

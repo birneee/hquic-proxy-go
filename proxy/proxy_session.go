@@ -9,11 +9,13 @@ import (
 )
 
 type proxySession struct {
-	sessionID        uint64
-	quicConnToClient quic.Connection
-	quicConnToServer quic.Connection
-	logger           common.Logger
-	closeOnce        sync.Once
+	sessionID          uint64
+	quicConnToClient   quic.Connection
+	quicConnToServer   quic.Connection
+	logger             common.Logger
+	clientFacingLogger common.Logger
+	serverFacingLogger common.Logger
+	closeOnce          sync.Once
 }
 
 func (s *proxySession) run() {
@@ -28,28 +30,12 @@ func (s *proxySession) handleOpenedStreams(conn1 quic.Connection, conn2 quic.Con
 	for {
 		stream1, err := conn1.AcceptStream(context.Background())
 		if err != nil {
-			switch err := err.(type) {
-			case *quic.ApplicationError:
-				s.handleApplicationError(conn1, err)
-			default:
-				s.logger.Errorf(err.Error())
-				//TODO make Transport Error instead of Application Error
-				_ = conn2.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy connection")
-			}
-			s.handleClose()
+			s.handleError(conn1, err)
 			return
 		}
 		stream2, err := conn2.OpenStream()
 		if err != nil {
-			switch err := err.(type) {
-			case *quic.ApplicationError:
-				s.handleApplicationError(conn2, err)
-			default:
-				s.logger.Errorf(err.Error())
-				//TODO make Transport Error instead of Application Error
-				_ = conn1.CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy quic connection")
-			}
-			s.handleClose()
+			s.handleError(conn2, err)
 			return
 		}
 		if stream1.StreamID() != stream2.StreamID() {
@@ -74,14 +60,61 @@ func (s *proxySession) handleOpenedStreams(conn1 quic.Connection, conn2 quic.Con
 	}
 }
 
-func (s *proxySession) handleApplicationError(from quic.Connection, err *quic.ApplicationError) {
-	s.closeOnce.Do(func() {
-		if err.Remote {
-			s.logger.Debugf("forward error: %s", err)
-			_ = s.otherConnection(from).CloseWithError(err.ErrorCode, err.ErrorMessage)
-		}
-		s.logger.Infof("close")
-	})
+func (s *proxySession) handleError(from quic.Connection, err error) {
+	switch err := err.(type) {
+	case *quic.TransportError:
+		s.getConnectionLogger(from).Infof("transport error: %v", err)
+		s.closeOnce.Do(func() {
+			s.logger.Infof("close")
+		})
+	case *quic.ApplicationError:
+		s.getConnectionLogger(from).Debugf("application error: %v", err)
+		s.closeOnce.Do(func() {
+			if err.Remote {
+				s.getConnectionLogger(s.otherConnection(from)).Debugf("forward error: %s", err)
+				_ = s.otherConnection(from).CloseWithError(err.ErrorCode, err.ErrorMessage)
+			}
+			s.logger.Infof("close")
+		})
+	case *quic.VersionNegotiationError:
+		s.getConnectionLogger(from).Infof("version negotiation error: %v", err)
+		s.closeOnce.Do(func() {
+			s.logger.Infof("close")
+		})
+	case *quic.StatelessResetError:
+		s.getConnectionLogger(from).Infof("stateless reset error: %v", err)
+		s.closeOnce.Do(func() {
+			s.logger.Infof("close")
+		})
+	case *quic.IdleTimeoutError:
+		s.getConnectionLogger(from).Infof("idle timeout error: %v", err)
+		s.closeOnce.Do(func() {
+			s.logger.Infof("close")
+		})
+	case *quic.HandshakeTimeoutError:
+		s.getConnectionLogger(from).Infof("handshake timeout error: %v", err)
+		s.closeOnce.Do(func() {
+			s.logger.Infof("close")
+		})
+	default:
+		s.getConnectionLogger(from).Infof("unknown error: %v", err)
+		s.closeOnce.Do(func() {
+			//TODO make Transport Error instead of Application Error
+			_ = s.otherConnection(from).CloseWithError(quic.ApplicationErrorCode(quic.InternalError), "error on other proxy quic connection")
+			s.logger.Infof("close")
+		})
+	}
+
+}
+
+func (s *proxySession) getConnectionLogger(conn quic.Connection) common.Logger {
+	switch conn {
+	case s.quicConnToClient:
+		return s.clientFacingLogger
+	case s.quicConnToServer:
+		return s.serverFacingLogger
+	}
+	panic("unknown connection")
 }
 
 func (s *proxySession) otherConnection(conn quic.Connection) quic.Connection {
@@ -92,10 +125,4 @@ func (s *proxySession) otherConnection(conn quic.Connection) quic.Connection {
 		return s.quicConnToClient
 	}
 	panic("unknown connection")
-}
-
-func (s *proxySession) handleClose() {
-	s.closeOnce.Do(func() {
-		s.logger.Infof("close")
-	})
 }

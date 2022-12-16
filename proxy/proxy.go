@@ -153,21 +153,25 @@ func (p *proxy) run() {
 				panic(err)
 			}
 		}
-		controlSession.logger.Infof("open")
-		handoverState, err := controlSession.readHandoverStateAndClose()
-		if err != nil {
-			controlSession.logger.Errorf("failed to read handover state: %s", err)
-			continue
-		}
-		controlSession.logger.Infof("handover state received")
-		controlSession.logger.Infof("closed")
-		proxySessionID := p.nextProxySessionId
-		p.nextProxySessionId += 1
-		err = p.runProxySession(handoverState, proxySessionID, controlSession.quicConn.RemoteAddr().(*net.UDPAddr))
-		if err != nil {
-			controlSession.logger.Errorf("failed to run proxy session: %s", err)
-			continue
-		}
+
+		// use goroutine to not block other request while receiving H-QUIC state
+		go func() {
+			controlSession.logger.Infof("open")
+			handoverState, err := controlSession.readHandoverStateAndClose()
+			if err != nil {
+				controlSession.logger.Errorf("failed to read handover state: %s", err)
+				return
+			}
+			controlSession.logger.Infof("handover state received")
+			controlSession.logger.Infof("closed")
+			proxySessionID := p.nextProxySessionId
+			p.nextProxySessionId += 1
+			err = p.runProxySession(handoverState, proxySessionID, controlSession.quicConn.RemoteAddr().(*net.UDPAddr))
+			if err != nil {
+				controlSession.logger.Errorf("failed to run proxy session: %s", err)
+				return
+			}
+		}()
 	}
 }
 
@@ -259,14 +263,14 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 			return err
 		}
 		if clientAddr.IP.IsUnspecified() {
-			//TODO this this does not work through NATs, client should multiplex connections
+			//TODO this does not work through NATs, client should multiplex connections
 			state.ClientAddress = (&net.UDPAddr{IP: requesterAddr.IP, Port: clientAddr.Port}).String()
 		}
 	}
 
 	logger := p.config.Logger.WithPrefix(fmt.Sprintf("proxy_session %d", sessionID))
 	tracer := common.NewMigrationTracer(func(addr net.Addr) {
-		logger.Debugf("migrated to %s\n", addr)
+		logger.Debugf("migrated to %s", addr)
 	})
 
 	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.config.ServerFacingProxyConnectionConfig, tracer)
@@ -284,10 +288,12 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	}
 
 	proxySession := proxySession{
-		sessionID:        sessionID,
-		quicConnToServer: serverFacingConn,
-		quicConnToClient: clientFacingConn,
-		logger:           logger,
+		sessionID:          sessionID,
+		quicConnToServer:   serverFacingConn,
+		quicConnToClient:   clientFacingConn,
+		logger:             logger,
+		clientFacingLogger: logger.WithPrefix("client_facing"),
+		serverFacingLogger: logger.WithPrefix("server_facing"),
 	}
 
 	go proxySession.run()
