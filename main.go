@@ -86,6 +86,11 @@ func main() {
 				Name:  "client-facing-initial-receive-window",
 				Usage: "the initial receive window on the client facing proxy connection, in bytes, overwrites the value from the handover state",
 			},
+			&cli.BoolFlag{
+				Name:  "client-facing-hybla-westwood",
+				Usage: "use the hybla-westwood congestion control algorithms on the client facing proxy connection",
+				Value: false,
+			},
 			&cli.StringFlag{
 				Name:  "server-facing-initial-receive-window",
 				Usage: "the initial receive window on the server facing proxy connection, in bytes, overwrites the value from the handover state",
@@ -200,14 +205,15 @@ func main() {
 					Tracer:                        serverFacingTracer,
 				},
 				ClientFacingProxyConnectionConfig: &proxy.RestoreConfig{
-					InitialCongestionWindow:       uint32(c.Uint("client-facing-initial-congestion-window")),
-					MinCongestionWindow:           uint32(c.Uint("client-facing-min-congestion-window")),
-					MaxCongestionWindow:           uint32(c.Uint("client-facing-max-congestion-window")),
-					InitialSlowStartThreshold:     quic.ByteCount(c.Int64("client-facing-initial-slow-start-threshold")),
-					MinSlowStartThreshold:         quic.ByteCount(c.Int64("client-facing-min-slow-start-threshold")),
-					MaxSlowStartThreshold:         quic.ByteCount(c.Int64("client-facing-max-slow-start-threshold")),
-					OverwriteInitialReceiveWindow: clientSideInitialReceiveWindow,
-					Tracer:                        clientFacingTracer,
+					InitialCongestionWindow:        uint32(c.Uint("client-facing-initial-congestion-window")),
+					MinCongestionWindow:            uint32(c.Uint("client-facing-min-congestion-window")),
+					MaxCongestionWindow:            uint32(c.Uint("client-facing-max-congestion-window")),
+					InitialSlowStartThreshold:      quic.ByteCount(c.Int64("client-facing-initial-slow-start-threshold")),
+					MinSlowStartThreshold:          quic.ByteCount(c.Int64("client-facing-min-slow-start-threshold")),
+					MaxSlowStartThreshold:          quic.ByteCount(c.Int64("client-facing-max-slow-start-threshold")),
+					OverwriteInitialReceiveWindow:  clientSideInitialReceiveWindow,
+					HyblaWestwoodCongestionControl: c.Bool("client-facing-hybla-westwood"),
+					Tracer:                         clientFacingTracer,
 				},
 			})
 			if err != nil {

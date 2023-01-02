@@ -32,7 +32,8 @@ type RestoreConfig struct {
 	MaxSlowStartThreshold         quic.ByteCount
 	Tracer                        logging.Tracer
 	// add a proxy on this connection after restore
-	ProxyConf *quic.ProxyConfig
+	ProxyConf                      *quic.ProxyConfig
+	HyblaWestwoodCongestionControl bool
 }
 
 func populateRestoreConfig(config *RestoreConfig) *RestoreConfig {
@@ -240,6 +241,9 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 		if pcc.MaxSlowStartThreshold != 0 {
 			conf.MaxSlowStartThreshold = pcc.MaxSlowStartThreshold
 		}
+
+		conf.HyblaWestwoodCongestionControl = pcc.HyblaWestwoodCongestionControl
+
 		if pcc.Tracer != nil {
 			conf.Tracer = logging.NewMultiplexedTracer(tracer, pcc.Tracer)
 		} else {
