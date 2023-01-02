@@ -125,7 +125,7 @@ func Run(config *Config) (Proxy, error) {
 	}
 
 	// print new reno as this is the only option in quic-go
-	config.Logger.Infof("starting proxy with pid %d, port %d, cc new reno", os.Getpid(), config.ControlConfig.Addr.(*net.UDPAddr).Port)
+	config.Logger.Infof("starting proxy with pid %d, port %d", os.Getpid(), config.ControlConfig.Addr.(*net.UDPAddr).Port)
 	go p.run()
 
 	return p, nil
