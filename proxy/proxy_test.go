@@ -55,7 +55,7 @@ var serverConfig = &quic.Config{
 
 var proxyControlTlsConfig = &tls.Config{
 	InsecureSkipVerify: true,
-	NextProtos:         []string{common.HQUICProxyALPN},
+	NextProtos:         []string{quic.HQUICProxyALPN},
 }
 
 var clientTlsConfig = &tls.Config{
@@ -73,6 +73,14 @@ var proxyTlsConfig = &tls.Config{
 }
 
 func TestOneProxy(t *testing.T) {
+	testOneProxy(t, false)
+}
+
+func TestEarlyHandoverOneProxy(t *testing.T) {
+	testOneProxy(t, true)
+}
+
+func testOneProxy(t *testing.T, allowEarlyHandover bool) {
 	serverContext, serverContextCancel := context.WithCancel(context.Background())
 	serverAddrChan := make(chan net.Addr, 1)
 	go func() {
@@ -117,6 +125,7 @@ func TestOneProxy(t *testing.T) {
 
 	proxyAddr := <-proxyAddrChan
 	clientConfig := clientConfig.Clone()
+	clientConfig.AllowEarlyHandover = allowEarlyHandover
 	clientConfig.ProxyConf = &quic.ProxyConfig{
 		Addr:    proxyAddr.String(),
 		TlsConf: proxyControlTlsConfig,
