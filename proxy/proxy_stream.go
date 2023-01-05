@@ -82,8 +82,8 @@ func (s *proxyStream) run() {
 
 func (s *proxyStream) connectionOf(stream interface{}) quic.Connection {
 	if stream == s.streamToClient {
-		return s.proxySession.quicConnToClient
+		return s.proxySession.clientFacingConn
 	} else {
-		return s.proxySession.quicConnToServer
+		return s.proxySession.serverFacingConn
 	}
 }

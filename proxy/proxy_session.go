@@ -9,19 +9,20 @@ import (
 )
 
 type proxySession struct {
-	sessionID          uint64
-	quicConnToClient   quic.Connection
-	quicConnToServer   quic.Connection
-	logger             common.Logger
-	clientFacingLogger common.Logger
-	serverFacingLogger common.Logger
-	closeOnce          sync.Once
+	sessionID                     uint64
+	clientFacingConn              quic.Connection
+	serverFacingConn              quic.Connection
+	logger                        common.Logger
+	clientFacingLogger            common.Logger
+	serverFacingLogger            common.Logger
+	closeOnce                     sync.Once
+	forwardHandshakeDoneFrameOnce sync.Once
 }
 
 func (s *proxySession) run() {
 	s.logger.Infof("open")
-	go s.handleOpenedStreams(s.quicConnToClient, s.quicConnToServer)
-	go s.handleOpenedStreams(s.quicConnToServer, s.quicConnToClient)
+	go s.handleOpenedStreams(s.clientFacingConn, s.serverFacingConn)
+	go s.handleOpenedStreams(s.serverFacingConn, s.clientFacingConn)
 }
 
 // handle streams opened by the conn1
@@ -48,7 +49,7 @@ func (s *proxySession) handleOpenedStreams(conn1 quic.Connection, conn2 quic.Con
 			logger:       s.logger.WithPrefix(fmt.Sprintf("stream %d", stream1.StreamID())),
 		}
 
-		if conn1 == s.quicConnToClient {
+		if conn1 == s.clientFacingConn {
 			ps.streamToClient = stream1
 			ps.streamToServer = stream2
 		} else {
@@ -109,9 +110,9 @@ func (s *proxySession) handleError(from quic.Connection, err error) {
 
 func (s *proxySession) getConnectionLogger(conn quic.Connection) common.Logger {
 	switch conn {
-	case s.quicConnToClient:
+	case s.clientFacingConn:
 		return s.clientFacingLogger
-	case s.quicConnToServer:
+	case s.serverFacingConn:
 		return s.serverFacingLogger
 	}
 	panic("unknown connection")
@@ -119,10 +120,20 @@ func (s *proxySession) getConnectionLogger(conn quic.Connection) common.Logger {
 
 func (s *proxySession) otherConnection(conn quic.Connection) quic.Connection {
 	switch conn {
-	case s.quicConnToClient:
-		return s.quicConnToServer
-	case s.quicConnToServer:
-		return s.quicConnToClient
+	case s.clientFacingConn:
+		return s.serverFacingConn
+	case s.serverFacingConn:
+		return s.clientFacingConn
 	}
 	panic("unknown connection")
+}
+
+func (s *proxySession) onServerFacingConnectionReceiveHandshakeDoneFrame() {
+	s.forwardHandshakeDoneFrameOnce.Do(func() {
+		s.logger.Infof("forward HANDSHAKE_DONE frame")
+		err := s.clientFacingConn.QueueHandshakeDoneFrame()
+		if err != nil {
+			panic(err)
+		}
+	})
 }

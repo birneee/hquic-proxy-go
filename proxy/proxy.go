@@ -273,31 +273,34 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	}
 
 	logger := p.config.Logger.WithPrefix(fmt.Sprintf("proxy_session %d", sessionID))
-	tracer := common.NewMigrationTracer(func(addr net.Addr) {
-		logger.Debugf("migrated to %s", addr)
-	})
-
-	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.config.ServerFacingProxyConnectionConfig, tracer)
-	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
-	serverFacingConn, err := quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
-	if err != nil {
-		return err
-	}
-
-	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.config.ClientFacingProxyConnectionConfig, tracer)
-	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
-	clientFacingConn, err := quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
-	if err != nil {
-		return err
-	}
 
 	proxySession := proxySession{
 		sessionID:          sessionID,
-		quicConnToServer:   serverFacingConn,
-		quicConnToClient:   clientFacingConn,
 		logger:             logger,
 		clientFacingLogger: logger.WithPrefix("client_facing"),
 		serverFacingLogger: logger.WithPrefix("server_facing"),
+	}
+
+	migrationTracer := common.NewMigrationTracer(func(addr net.Addr) {
+		logger.Debugf("migrated to %s", addr)
+	})
+
+	handshakeDoneFrameTracer := common.NewFrameTracer[logging.HandshakeDoneFrame](func() {
+		proxySession.onServerFacingConnectionReceiveHandshakeDoneFrame()
+	})
+
+	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.config.ServerFacingProxyConnectionConfig, logging.NewMultiplexedTracer(migrationTracer, handshakeDoneFrameTracer))
+	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
+	proxySession.serverFacingConn, err = quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
+	if err != nil {
+		return err
+	}
+
+	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.config.ClientFacingProxyConnectionConfig, migrationTracer)
+	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
+	proxySession.clientFacingConn, err = quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
+	if err != nil {
+		return err
 	}
 
 	go proxySession.run()
