@@ -130,7 +130,7 @@ func (s *proxySession) otherConnection(conn quic.Connection) quic.Connection {
 
 func (s *proxySession) onServerFacingConnectionReceiveHandshakeDoneFrame() {
 	s.forwardHandshakeDoneFrameOnce.Do(func() {
-		s.logger.Infof("forward HANDSHAKE_DONE frame")
+		s.logger.Debugf("forward HANDSHAKE_DONE frame")
 		err := s.clientFacingConn.QueueHandshakeDoneFrame()
 		if err != nil {
 			panic(err)
