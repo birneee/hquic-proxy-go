@@ -91,6 +91,11 @@ func main() {
 				Usage: "use the hybla-westwood congestion control algorithms on the client facing proxy connection",
 				Value: false,
 			},
+			&cli.IntFlag{
+				Name:  "client-facing-pto",
+				Usage: "if not zero, use this fixed PTO in milliseconds instead of the default PTO behavior",
+				Value: 0,
+			},
 			&cli.StringFlag{
 				Name:  "server-facing-initial-receive-window",
 				Usage: "the initial receive window on the server facing proxy connection, in bytes, overwrites the value from the handover state",
@@ -214,6 +219,7 @@ func main() {
 					OverwriteInitialReceiveWindow:  clientSideInitialReceiveWindow,
 					HyblaWestwoodCongestionControl: c.Bool("client-facing-hybla-westwood"),
 					Tracer:                         clientFacingTracer,
+					FixedPTO:                       time.Duration(c.Int("client-facing-pto")) * time.Millisecond,
 				},
 			})
 			if err != nil {

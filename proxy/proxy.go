@@ -10,6 +10,7 @@ import (
 	"github.com/lucas-clemente/quic-go/logging"
 	"net"
 	"os"
+	"time"
 )
 
 type proxy struct {
@@ -34,6 +35,7 @@ type RestoreConfig struct {
 	// add a proxy on this connection after restore
 	ProxyConf                      *quic.ProxyConfig
 	HyblaWestwoodCongestionControl bool
+	FixedPTO                       time.Duration
 }
 
 func populateRestoreConfig(config *RestoreConfig) *RestoreConfig {
@@ -243,6 +245,7 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 		}
 
 		conf.HyblaWestwoodCongestionControl = pcc.HyblaWestwoodCongestionControl
+		conf.FixedPTO = pcc.FixedPTO
 
 		if pcc.Tracer != nil {
 			conf.Tracer = logging.NewMultiplexedTracer(tracer, pcc.Tracer)
