@@ -17,6 +17,20 @@ type proxyStream struct {
 }
 
 func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
+
+	bytesToSkip := dst.WriteOffset() - src.ReadOffset()
+	if bytesToSkip < 0 {
+		panic("stream offset mismatch")
+	}
+	// TODO restore state so that workaround is not necessary
+	if bytesToSkip > 0 {
+		n, err := io.CopyN(io.Discard, src, int64(bytesToSkip))
+		if err != nil || n != int64(bytesToSkip) {
+			panic("stream offset mismatch: failed to skip")
+		}
+		s.logger.Debugf("stream offset mismatch: skipped %d bytes", bytesToSkip)
+	}
+
 	eof := false
 	buf := make([]byte, 1e6)
 	for {
@@ -42,25 +56,27 @@ func (s *proxyStream) forward(dst quic.SendStream, src quic.ReceiveStream) {
 			}
 		}
 
-		nw, err := dst.Write(buf[0:nr])
-		if err != nil {
-			switch err := err.(type) {
-			case *quic.StreamError:
-				// dst endpoint sent CancelRead
-				// forward to src endpoint
-				src.CancelRead(err.ErrorCode)
-				return
-			case *quic.ApplicationError:
-				s.proxySession.handleError(s.connectionOf(dst), err)
-				return
-			default:
-				s.proxySession.handleError(s.connectionOf(dst), err)
-				return
+		if nr != 0 {
+			nw, err := dst.Write(buf[0:nr])
+			if err != nil {
+				switch err := err.(type) {
+				case *quic.StreamError:
+					// dst endpoint sent CancelRead
+					// forward to src endpoint
+					src.CancelRead(err.ErrorCode)
+					return
+				case *quic.ApplicationError:
+					s.proxySession.handleError(s.connectionOf(dst), err)
+					return
+				default:
+					s.proxySession.handleError(s.connectionOf(dst), err)
+					return
+				}
 			}
-		}
 
-		if nr != nw {
-			panic("short write error")
+			if nr != nw {
+				panic("short write error")
+			}
 		}
 
 		if eof {

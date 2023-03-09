@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/birneee/hquic-proxy-go/common"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/handover"
@@ -22,7 +23,7 @@ func newControlSession(sessionID uint64, quicConn quic.Connection, logger common
 func (s *controlSession) readHandoverStateAndClose() (*handover.State, error) {
 	stream, err := s.quicConn.AcceptStream(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to accept stream: %w", err)
 	}
 
 	marshalledState, err := io.ReadAll(stream)

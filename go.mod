@@ -3,7 +3,7 @@ module github.com/birneee/hquic-proxy-go
 go 1.19
 
 replace (
-	github.com/lucas-clemente/quic-go => github.com/birneee/quic-go v0.32.1-0.20230119083324-1897b9d18542
+	github.com/lucas-clemente/quic-go => github.com/birneee/quic-go v0.32.1-0.20230309155005-ab6f9fb462b6
 	github.com/marten-seemann/qtls-go1-19 => github.com/birneee/qtls-go1-19 v0.1.0
 )
 

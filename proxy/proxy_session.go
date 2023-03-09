@@ -39,25 +39,12 @@ func (s *proxySession) handleOpenedStreams(conn1 quic.Connection, conn2 quic.Con
 			s.handleError(conn2, err)
 			return
 		}
-		if stream1.StreamID() != stream2.StreamID() {
-			panic("stream IDs do not match")
-		}
-
-		ps := proxyStream{
-			proxySession: s,
-			streamID:     stream1.StreamID(),
-			logger:       s.logger.WithPrefix(fmt.Sprintf("stream %d", stream1.StreamID())),
-		}
 
 		if conn1 == s.clientFacingConn {
-			ps.streamToClient = stream1
-			ps.streamToServer = stream2
+			s.connectStreams(stream1, stream2)
 		} else {
-			ps.streamToServer = stream1
-			ps.streamToClient = stream2
+			s.connectStreams(stream2, stream1)
 		}
-
-		ps.run()
 	}
 }
 
@@ -136,4 +123,34 @@ func (s *proxySession) onServerFacingConnectionReceiveHandshakeDoneFrame() {
 			panic(err)
 		}
 	})
+}
+
+func (s *proxySession) connectAllStreams(clientFacingStreams map[quic.StreamID]quic.Stream, serverFacingStreams map[quic.StreamID]quic.Stream) error {
+	if len(clientFacingStreams) != len(serverFacingStreams) {
+		return fmt.Errorf("number of streams mismatch")
+	}
+	for id, clientFacingStream := range clientFacingStreams {
+		serverFacingStream, ok := serverFacingStreams[id]
+		if !ok {
+			return fmt.Errorf("no matching stream for %d", id)
+		}
+		s.connectStreams(clientFacingStream, serverFacingStream)
+	}
+	return nil
+}
+
+func (s *proxySession) connectStreams(clientFacingStream quic.Stream, serverFacingStream quic.Stream) {
+	if clientFacingStream.StreamID() != serverFacingStream.StreamID() {
+		panic("stream IDs do not match")
+	}
+
+	ps := proxyStream{
+		proxySession:   s,
+		streamID:       clientFacingStream.StreamID(),
+		logger:         s.logger.WithPrefix(fmt.Sprintf("stream %d", clientFacingStream.StreamID())),
+		streamToClient: clientFacingStream,
+		streamToServer: serverFacingStream,
+	}
+
+	ps.run()
 }

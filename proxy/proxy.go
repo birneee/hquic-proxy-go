@@ -149,7 +149,7 @@ func (p *proxy) run() {
 		if err != nil {
 			switch err.(type) {
 			default:
-				if err.Error() == "server closed" {
+				if err.Error() == "server closed" || err.Error() == "quic: Server closed" {
 					// close gracefully
 					return
 				}
@@ -165,7 +165,8 @@ func (p *proxy) run() {
 				controlSession.logger.Errorf("failed to read handover state: %s", err)
 				return
 			}
-			controlSession.logger.Infof("handover state received, odcid: %s", quic.ConnectionIDFromBytes(handoverState.OriginalDestinationConnectionID).String())
+			serverTP := handoverState.OwnTransportParameters(logging.PerspectiveServer)
+			controlSession.logger.Infof("handover state received, odcid: %s", serverTP.OriginalDestinationConnectionID.String())
 			controlSession.logger.Infof("closed")
 			proxySessionID := p.nextProxySessionId
 			p.nextProxySessionId += 1
@@ -179,10 +180,13 @@ func (p *proxy) run() {
 }
 
 func (p *proxy) validateHandoverState(state *handover.State) error {
-	if state.ClientTransportParameters.ExtraStreamEncryption == true {
+	clientTP := state.OwnTransportParameters(logging.PerspectiveClient)
+	serverTP := state.OwnTransportParameters(logging.PerspectiveServer)
+
+	if clientTP.ExtraStreamEncryption == true {
 		return fmt.Errorf("XSE-QUIC extra_stream_encryption transport parameter must not be part of H-QUIC handover state")
 	}
-	if state.ServerTransportParameters.ExtraStreamEncryption == true {
+	if serverTP.ExtraStreamEncryption == true {
 		return fmt.Errorf("XSE-QUIC extra_stream_encryption transport parameter must not be part of H-QUIC handover state")
 	}
 	return nil
@@ -191,6 +195,8 @@ func (p *proxy) validateHandoverState(state *handover.State) error {
 func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, tracer logging.Tracer) (*handover.State, *quic.Config) {
 	conf := &quic.Config{}
 	s := originalHandoverState.Clone()
+	clientTP := s.OwnTransportParameters(logging.PerspectiveClient)
+	serverTP := s.OwnTransportParameters(logging.PerspectiveServer)
 
 	if pcc != nil {
 		if pcc.ProxyConf != nil {
@@ -212,14 +218,14 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 		if pcc.OverwriteInitialReceiveWindow != 0 {
 			conf.InitialStreamReceiveWindow = pcc.OverwriteInitialReceiveWindow
 			conf.InitialConnectionReceiveWindow = uint64(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
-			s.ServerTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ServerTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ServerTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ServerTransportParameters.InitialMaxData = quic.ByteCount(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
-			s.ClientTransportParameters.InitialMaxStreamDataBidiLocal = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ClientTransportParameters.InitialMaxStreamDataBidiRemote = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ClientTransportParameters.InitialMaxStreamDataUni = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
-			s.ClientTransportParameters.InitialMaxData = quic.ByteCount(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+			serverTP.InitialMaxStreamDataBidiLocal = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			serverTP.InitialMaxStreamDataBidiRemote = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			serverTP.InitialMaxStreamDataUni = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			serverTP.InitialMaxData = quic.ByteCount(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
+			clientTP.InitialMaxStreamDataBidiLocal = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			clientTP.InitialMaxStreamDataBidiRemote = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			clientTP.InitialMaxStreamDataUni = quic.ByteCount(pcc.OverwriteInitialReceiveWindow)
+			clientTP.InitialMaxData = quic.ByteCount(float64(pcc.OverwriteInitialReceiveWindow) * quic.ConnectionFlowControlMultiplier)
 		}
 		if pcc.MaxReceiveWindow != 0 {
 			conf.MaxStreamReceiveWindow = pcc.MaxReceiveWindow
@@ -253,6 +259,9 @@ func applyConfig(originalHandoverState *handover.State, pcc *RestoreConfig, trac
 			conf.Tracer = tracer
 		}
 	}
+
+	s.SetOwnTransportParameters(logging.PerspectiveClient, clientTP)
+	s.SetOwnTransportParameters(logging.PerspectiveServer, serverTP)
 
 	return s, conf
 }
@@ -302,7 +311,8 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 
 	clientFacingHandoverState, clientFacingConfig := applyConfig(state, p.config.ClientFacingProxyConnectionConfig, connectionTracer)
 	clientFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (client facing)", sessionID)
-	proxySession.clientFacingConn, err = quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
+	var clientFacingBidiStreams map[quic.StreamID]quic.Stream
+	proxySession.clientFacingConn, clientFacingBidiStreams, _, _, err = quic.Restore(*clientFacingHandoverState, quic.PerspectiveServer, clientFacingConfig)
 	if err != nil {
 		return err
 	}
@@ -310,7 +320,13 @@ func (p *proxy) runProxySession(state *handover.State, sessionID uint64, request
 	// restore server-facing after client-facing connection so client-facing connection is available for HANDOVER_DONE forwarding
 	serverFacingHandoverState, serverFacingConfig := applyConfig(state, p.config.ServerFacingProxyConnectionConfig, logging.NewMultiplexedTracer(connectionTracer, handshakeDoneFrameTracer))
 	serverFacingConfig.LoggerPrefix = fmt.Sprintf("proxy_session %d (server facing)", sessionID)
-	proxySession.serverFacingConn, err = quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
+	var serverFacingBidiStreams map[quic.StreamID]quic.Stream
+	proxySession.serverFacingConn, serverFacingBidiStreams, _, _, err = quic.Restore(*serverFacingHandoverState, quic.PerspectiveClient, serverFacingConfig)
+	if err != nil {
+		return err
+	}
+
+	err = proxySession.connectAllStreams(clientFacingBidiStreams, serverFacingBidiStreams)
 	if err != nil {
 		return err
 	}
